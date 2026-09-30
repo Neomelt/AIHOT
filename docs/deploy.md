@@ -70,6 +70,26 @@ docker compose logs -f --tail 100 api worker web
 
 后台的“运行”页能看到每个定时任务最近的结果，“信源”页能看到每个信源的抓取状况。
 
+## Telegram 通知
+
+Telegram 通知和飞书推送彼此独立。先在 Telegram 的 BotFather 创建 bot，把它加入目标群组或频道并授予发消息权限，再把下面的配置写入服务器 `.env`：
+
+```env
+TELEGRAM_CONTENT_PUSH_ENABLED=true
+TELEGRAM_BOT_TOKEN=你的_bot_token
+TELEGRAM_CHAT_ID=精选内容目标聊天_id
+
+# 可选：系统告警使用单独的私聊或运维群。
+TELEGRAM_ALERT_ENABLED=true
+TELEGRAM_ALERT_CHAT_ID=告警目标聊天_id
+```
+
+数据库迁移完成后，登录后台“设置 → 通知目的地”，启用“Telegram 精选内容”。启用前已经发布的内容不会补推；之后新入选的内容会通过 Worker 发送，并在“运行”页留下投递记录。bot token 只放在服务器环境变量中，不要提交到 Git。
+
+`SITE_URL` 要设成你的网站地址，消息中的站内按钮会使用它。私聊需要先向 bot 发送 `/start`；群组 ID 通常为负数，公开频道也可以使用 `@频道用户名`。服务器必须能访问 `api.telegram.org`。修改环境变量后重启 API 和 Worker（Docker Compose 用 `docker compose up -d`）。
+
+目前 Telegram 支持精选内容、系统告警和信源周报；Codex 重置通知与访客反馈转发仍使用飞书。发送结果不确定时不自动重试，请在后台“运行”页核对后人工处理。
+
 ## 花多少钱
 
 - **模型**：每条新资料至少预筛一次；可能入选的再评分两次，入选的还要写标题摘要、打标签、归组，另外还有日报和事件综述。我们用示范信源在本地试跑，第一次导入的 152 条资料一共用了大约 930 次模型调用。之后每天用多少，取决于你的信源每天更新多少条。后台“模型与评测”页能看到每一步的调用次数和输入输出 token 数。

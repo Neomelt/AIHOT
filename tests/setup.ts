@@ -13,6 +13,8 @@ process.env.AIHOT_CREDENTIALS_DIR = "/nonexistent-test-credentials";
 process.env.SESSION_SECRET ??= "test-session-secret-0123456789";
 process.env.IMG_PROXY_SIGN_SECRET ??= "test-img-secret-0123456789";
 process.env.FEISHU_CONTENT_PUSH_ENABLED = "false";
+process.env.TELEGRAM_CONTENT_PUSH_ENABLED = "false";
+process.env.TELEGRAM_ALERT_ENABLED = "false";
 process.env.INDEXNOW_SUBMIT_ENABLED = "false";
 process.env.LOG_LEVEL ??= "error";
 // The tests were written against the named model presets AIHOT assigns to each step (each provider is

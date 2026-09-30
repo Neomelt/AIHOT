@@ -107,13 +107,10 @@ export function formatRecovery(title: string, since: Date, now: number): { title
 }
 
 /** Operations alert: the alert chat, falling back to the internal feedback chat — never a content group. */
-export async function sendAlert(title: string, lines: string[]): Promise<"sent" | "disabled"> {
+export async function sendFeishuAlert(title: string, lines: string[]): Promise<"sent" | "disabled"> {
   // Production needs no label; any other environment that has sending on says which one it is.
   const text = `${config.environmentName === "production" ? "" : `【${config.environmentName}】`}${title}\n${lines.join("\n")}`;
-  if (!feishuInternalEnabled()) {
-    console.log(JSON.stringify({ level: "warn", msg: "alert (not sent: FEISHU_INTERNAL_ENABLED is off)", title, lines }));
-    return "disabled";
-  }
+  if (!feishuInternalEnabled()) return "disabled";
   const chat = credential("integrations", "FEISHU_ALERT_CHAT_ID") ?? credential("integrations", "FEISHU_INTERNAL_CHAT_ID");
   if (!chat) return "disabled";
   await sendToChat(chat, "text", { text });

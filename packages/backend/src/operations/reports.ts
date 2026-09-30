@@ -1,7 +1,8 @@
 // The Monday source-health report for the ops chat. It goes through the same gated channel as the
-// alerts (off unless FEISHU_INTERNAL_ENABLED).
+// alerts (sent only to explicitly enabled Feishu/Telegram operations chats).
 import { sql } from "../db.ts";
-import { beijingDay, sendAlert } from "../notify/feishu.ts";
+import { beijingDay } from "../notify/feishu.ts";
+import { sendAlert } from "../notify/alerts.ts";
 
 const pct = (a: number, b: number) => (b ? `${a >= b ? "+" : ""}${(((a - b) / b) * 100).toFixed(0)}%` : "—");
 const n = (v: number) => v.toLocaleString("en-US");

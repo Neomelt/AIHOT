@@ -7,6 +7,7 @@ import { itemUrl } from "../publication/links.ts";
 import { CATEGORY_LABELS, type CategoryKey } from "@aihot/contracts/taxonomy";
 import { deliverContent } from "./deliver.ts";
 import { SITE } from "@aihot/industry/site";
+import type { TelegramMessage } from "./telegram.ts";
 
 const MAX_AGE_MS = 12 * 3600_000;
 const LEASE_MS = 10 * 60_000;
@@ -56,6 +57,14 @@ function card(r: Row) {
   };
 }
 
+function telegramMessage(r: Row): TelegramMessage {
+  return {
+    text: [`📰 ${SITE.name} · 精选`, r.title, `来源：${r.source_name}`, r.summary, r.reason ? `推荐理由：${r.reason}` : null].filter(Boolean).join("\n\n"),
+    // Keep links available even when Telegram's text limit truncates a long summary.
+    links: [{ text: `${SITE.name} 查看`, url: itemUrl(r.article_id) }, { text: "原文", url: r.url }],
+  };
+}
+
 export async function pushSelected(articleId: string, now = new Date()): Promise<PushOutcome> {
   const [r] = await sql<Row[]>`
     SELECT p.article_id, p.selected, p.visibility, p.title, p.summary, p.reason, p.category, s.name AS source_name, p.url,
@@ -78,6 +87,6 @@ export async function pushSelected(articleId: string, now = new Date()): Promise
   if (lease && lease.holder !== articleId && !r.fact_id) return { status: "retry", after: new Date(now.getTime() + 2 * 60_000), reason: "same title in flight" };
 
   const dedupeKey = r.fact_id ? `selected:fact:${r.fact_id}` : `selected:article:${articleId}`;
-  const targets = await deliverContent({ subjectKind: "selected", subjectId: articleId, dedupeKey, contentAt: r.discovered_at, card: card(r) });
+  const targets = await deliverContent({ subjectKind: "selected", subjectId: articleId, dedupeKey, contentAt: r.discovered_at, card: card(r), telegram: telegramMessage(r) });
   return { status: targets.some((t) => t.status === "sent") ? "pushed" : "skipped", targets, reason: targets.length ? undefined : "no new target" };
 }

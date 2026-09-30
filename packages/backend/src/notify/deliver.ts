@@ -1,11 +1,11 @@
-// Content-group deliveries (Feishu custom-bot webhooks): selected cards and reset pushes.
+// Content deliveries: Feishu cards and Telegram selected messages.
 // One row per target and dedupe key, so nothing is pushed twice; an outcome we cannot know
 // ("unknown") is never retried automatically; content older than a target's enabled_at is never
-// back-filled. FEISHU_CONTENT_PUSH_ENABLED is the safety valve: off, deliveries are recorded as
-// skipped and nothing leaves the process.
+// back-filled. Per-channel safety valves are off by default; skipped deliveries never leave the process.
 import { config, credential } from "../config.ts";
 import { sql } from "../db.ts";
 import { postWebhook } from "./feishu.ts";
+import { postTelegramMessage, type TelegramMessage } from "./telegram.ts";
 
 export interface DeliveryRequest {
   subjectKind: "codex_reset" | "selected";
@@ -14,13 +14,19 @@ export interface DeliveryRequest {
   /** When the underlying content appeared; older than a target's enabled_at means skip. */
   contentAt: Date;
   card: unknown;
+  /** Plain text and link buttons for Telegram; Feishu keeps using the interactive card. */
+  telegram?: TelegramMessage;
 }
 
 interface Target {
   key: string;
-  kind: "feishu_webhook" | "feishu_chat" | "log";
+  kind: "feishu_webhook" | "feishu_chat" | "telegram_bot" | "log";
   enabled_at: Date | null;
   config_ref: string | null;
+}
+
+export function contentPushEnabled(kind: string): boolean {
+  return kind === "feishu_webhook" ? config.feishuContentPushEnabled : kind === "telegram_bot" ? config.telegramContentPushEnabled : false;
 }
 
 /** Default content targets; they start disabled and are switched on in production only. */
@@ -28,7 +34,8 @@ export async function ensureContentTargets() {
   await sql`
     INSERT INTO notify_targets (key, purpose, kind, enabled, config_ref, note) VALUES
       ('feishu-content-main', 'content', 'feishu_webhook', false, 'FEISHU_PUSH_WEBHOOK_URL', '飞书内容主群'),
-      ('feishu-content-mirror', 'content', 'feishu_webhook', false, 'FEISHU_PUSH_MIRROR_WEBHOOK_URL', '飞书内容镜像群')
+      ('feishu-content-mirror', 'content', 'feishu_webhook', false, 'FEISHU_PUSH_MIRROR_WEBHOOK_URL', '飞书内容镜像群'),
+      ('telegram-content-main', 'content', 'telegram_bot', false, 'TELEGRAM_BOT_TOKEN', 'Telegram 精选内容')
     ON CONFLICT (key) DO NOTHING`;
 }
 
@@ -36,27 +43,33 @@ export async function deliverContent(req: DeliveryRequest): Promise<Array<{ targ
   const targets = await sql<Target[]>`SELECT key, kind, enabled_at, config_ref FROM notify_targets WHERE purpose = 'content' AND enabled`;
   const results: Array<{ target: string; status: string }> = [];
   for (const t of targets) {
+    // Telegram is intentionally a selected-content target for now; Codex reset cards remain Feishu-only.
+    if (t.kind === "telegram_bot" && req.subjectKind !== "selected") continue;
     if (t.enabled_at && req.contentAt < t.enabled_at) continue;
+    const payload = t.kind === "telegram_bot" ? req.telegram ?? null : req.card;
     const [row] = await sql<{ id: number }[]>`
       INSERT INTO deliveries (target_key, subject_kind, subject_id, dedupe_key, status, payload)
-      VALUES (${t.key}, ${req.subjectKind}, ${req.subjectId}, ${req.dedupeKey}, 'pending', ${sql.json(req.card as never)})
+      VALUES (${t.key}, ${req.subjectKind}, ${req.subjectId}, ${req.dedupeKey}, 'pending', ${sql.json(payload as never)})
       ON CONFLICT (target_key, dedupe_key) DO NOTHING RETURNING id`;
     if (!row) continue; // already delivered, skipped or in doubt
-    if (!config.feishuContentPushEnabled || t.kind !== "feishu_webhook") {
+    if (!contentPushEnabled(t.kind)) {
       await sql`UPDATE deliveries SET status = 'skipped', response = 'content push disabled', updated_at = now() WHERE id = ${row.id}`;
       results.push({ target: t.key, status: "skipped" });
       continue;
     }
-    const url = t.config_ref ? credential("integrations", t.config_ref) : undefined;
-    if (!url) {
-      await sql`UPDATE deliveries SET status = 'failed', response = 'webhook not configured', updated_at = now() WHERE id = ${row.id}`;
+    const destination = t.config_ref ? credential("integrations", t.config_ref) : null;
+    const chatId = t.kind === "telegram_bot" ? credential("integrations", "TELEGRAM_CHAT_ID") : null;
+    if (!destination || (t.kind === "telegram_bot" && (!chatId || !req.telegram?.text))) {
+      await sql`UPDATE deliveries SET status = 'failed', response = 'notification credentials or message not configured', updated_at = now() WHERE id = ${row.id}`;
       results.push({ target: t.key, status: "failed" });
       continue;
     }
     await sql`UPDATE deliveries SET status = 'sending', attempts = attempts + 1, updated_at = now() WHERE id = ${row.id}`;
     try {
-      const res = await postWebhook(url, req.card);
-      // A Feishu error code on HTTP 200, or a 4xx, is a definite rejection; 5xx may have gone through.
+      const res = t.kind === "feishu_webhook"
+        ? await postWebhook(destination, req.card)
+        : await postTelegramMessage(destination, chatId!, req.telegram!);
+      // A provider error on HTTP 200, or a 4xx, is a definite rejection; 5xx may have gone through.
       const status = res.ok ? "sent" : res.status < 500 ? "failed" : "unknown";
       await sql`UPDATE deliveries SET status = ${status}, response = ${res.body.slice(0, 500)}, sent_at = ${res.ok ? new Date() : null}, updated_at = now() WHERE id = ${row.id}`;
       results.push({ target: t.key, status });
@@ -78,12 +91,20 @@ export async function resendDelivery(id: number): Promise<{ status: string }> {
     SELECT d.status, d.payload, d.target_key, t.config_ref, t.kind FROM deliveries d JOIN notify_targets t ON t.key = d.target_key WHERE d.id = ${id}`;
   if (!d) throw new Error(`delivery ${id} not found`);
   if (d.status !== "unknown" && d.status !== "failed") throw new Error(`delivery ${id} is ${d.status}`);
-  if (!config.feishuContentPushEnabled || d.kind !== "feishu_webhook") throw new Error("content push is disabled in this environment");
-  const url = d.config_ref ? credential("integrations", d.config_ref) : undefined;
-  if (!url) throw new Error("webhook not configured");
-  await sql`UPDATE deliveries SET status = 'sending', attempts = attempts + 1, updated_at = now() WHERE id = ${id}`;
+  const isFeishu = d.kind === "feishu_webhook";
+  const isTelegram = d.kind === "telegram_bot";
+  if (!contentPushEnabled(d.kind)) throw new Error("content push is disabled in this environment");
+  const destination = d.config_ref ? credential("integrations", d.config_ref) : null;
+  const chatId = isTelegram ? credential("integrations", "TELEGRAM_CHAT_ID") : null;
+  const telegram = d.payload as TelegramMessage | null;
+  if (!destination || (isTelegram && (!chatId || typeof telegram?.text !== "string" || !telegram.text))) throw new Error("notification credentials or message not configured");
+  const claimed = await sql`UPDATE deliveries SET status = 'sending', attempts = attempts + 1, updated_at = now()
+    WHERE id = ${id} AND status IN ('unknown', 'failed') RETURNING id`;
+  if (!claimed.length) throw new Error("delivery is already being handled");
   try {
-    const res = await postWebhook(url, d.payload);
+    const res = isFeishu
+      ? await postWebhook(destination, d.payload)
+      : await postTelegramMessage(destination, chatId!, telegram!);
     const status = res.ok ? "sent" : res.status < 500 ? "failed" : "unknown";
     await sql`UPDATE deliveries SET status = ${status}, response = ${res.body.slice(0, 500)}, sent_at = ${res.ok ? new Date() : null}, updated_at = now() WHERE id = ${id}`;
     return { status };

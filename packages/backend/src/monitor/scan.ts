@@ -188,7 +188,7 @@ export async function flushResetPushes(): Promise<number> {
     WHERE p.processed_at IS NOT NULL AND p.author = ${AUTHOR} AND p.published_at > ${new Date(Date.now() - PUSH_MAX_AGE_MS)}
       AND EXISTS (
         SELECT 1 FROM notify_targets t
-        WHERE t.purpose = 'content' AND t.enabled AND (t.enabled_at IS NULL OR t.enabled_at <= p.published_at)
+        WHERE t.purpose = 'content' AND t.kind = 'feishu_webhook' AND t.enabled AND (t.enabled_at IS NULL OR t.enabled_at <= p.published_at)
           AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.target_key = t.key AND d.dedupe_key = 'codex:' || p.id || ':' || (n->>'eventId') || ':' || (n->>'action')))
     ORDER BY p.published_at, p.id`;
   if (!owed.length) return 0;

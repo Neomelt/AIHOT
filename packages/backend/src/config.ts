@@ -44,6 +44,8 @@ export const config = {
   egressProxyUrl: env.EGRESS_PROXY_URL || null,
   allowPrivateNetworkFetch: bool("ALLOW_PRIVATE_NETWORK_FETCH", false),
   feishuContentPushEnabled: bool("FEISHU_CONTENT_PUSH_ENABLED", false),
+  telegramContentPushEnabled: bool("TELEGRAM_CONTENT_PUSH_ENABLED", false),
+  telegramAlertEnabled: bool("TELEGRAM_ALERT_ENABLED", false),
   indexNowSubmitEnabled: bool("INDEXNOW_SUBMIT_ENABLED", false),
   /** IndexNow key (32 hex characters); without one nothing is submitted and no key file is served. */
   indexNowKey: /^[0-9a-f]{32}$/.test(env.INDEXNOW_KEY ?? "") ? env.INDEXNOW_KEY! : null,

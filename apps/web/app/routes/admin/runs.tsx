@@ -300,7 +300,7 @@ export default function RunsAdmin({ loaderData }: Route.ComponentProps) {
       <ReasonDialog
         open={!!delivery}
         title="处理投递"
-        description="先到对应飞书群确认有没有收到。确认没收到再重发；开发环境不会真的发出。"
+        description="先到对应的群组、频道或私聊确认有没有收到。确认没收到再重发；重发需要开启对应渠道的推送开关，也会发往已停用的目的地。"
         confirmLabel="确认"
         danger={outcome === "resend"}
         busy={pending === "delivery"}

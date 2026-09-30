@@ -92,7 +92,7 @@ function TargetToggle({ t }: { t: Settings["targets"][number] }) {
       <ReasonDialog
         open={open}
         title={`${t.enabled ? "停用" : "启用"}：${t.note ?? t.key}`}
-        description={t.enabled ? "停用后新的推送不再发往这个群。" : "启用时间会被记录：启用之前的内容不会补推。开发与彩排环境即使启用也不会真的发出。"}
+        description={t.enabled ? "停用后新的推送不再发往这个目的地。" : "启用时间会被记录：启用之前的内容不会补推。对应渠道的环境推送开关也开启后才会发出。"}
         danger={t.enabled}
         confirmLabel={t.enabled ? "停用" : "启用"}
         busy={pending === "target"}

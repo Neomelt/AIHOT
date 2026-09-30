@@ -3,10 +3,11 @@
 //   now    — readers are affected and it has not healed: sent at once, repeated hourly, recovery reported.
 //   today  — money at risk or only the owner can act: sent at once, repeated at most daily, recovery reported.
 //   digest — follow-ups without reader impact: one 09:00 message a day, meant to be handed to the AI.
-// Delivery goes through sendAlert (ops chat, internal-chat fallback; off unless FEISHU_INTERNAL_ENABLED).
+// Delivery goes through sendAlert (Feishu and/or Telegram operations chats, independently enabled).
 import { beijingDate, beijingTime } from "@aihot/contracts/time";
 import { sql } from "../db.ts";
-import { beijingDay, beijingStamp, duration, formatAlert, formatRecovery, sendAlert, type Finding, type Level } from "../notify/feishu.ts";
+import { beijingDay, beijingStamp, duration, formatAlert, formatRecovery, type Finding, type Level } from "../notify/feishu.ts";
+import { sendAlert } from "../notify/alerts.ts";
 import { backupConfigured } from "./backup.ts";
 
 const REPEAT_MS: Record<Exclude<Level, "digest">, number> = { now: 3600_000, today: 24 * 3600_000 };
@@ -85,7 +86,7 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
   // ---- Money, and things only the owner can do --------------------------------------------------
   out.push(...(await providerFindings()));
 
-  // Content-group pushes the Feishu webhook refused (a removed bot, a changed address); nothing resends them.
+  // Content pushes the provider refused (a removed bot, a changed address); nothing resends them.
   const [refused] = await sql<{ n: number; target: string | null; response: string | null }[]>`
     SELECT count(*)::int AS n, max(t.note) AS target, left(max(d.response), 200) AS response FROM deliveries d JOIN notify_targets t ON t.key = d.target_key
     WHERE d.status = 'failed' AND d.updated_at > now() - interval '1 day'`;
@@ -93,7 +94,7 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
     out.push({
       key: "deliveries.failed",
       level: "today",
-      title: "飞书内容群有推送没发出去",
+      title: "内容推送有消息没发出去",
       impact: `过去 24 小时 ${refused!.n} 条精选或重置通知没进${refused!.target ?? "内容群"}`,
       heals: "不会自动重发",
       action: "转给 AI 处理；如果推送机器人被移出了群，需要你把它加回去",
@@ -161,7 +162,7 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
   if (r!.receipts > 0) {
     out.push({ key: "receipts.unknown", level: "digest", title: `${r!.receipts} 个付费请求自动重试过一次，结果仍未知`, detail: `${r!.services}；后台“运行”页核对后放行` });
   }
-  if (r!.deliveries > 0) out.push({ key: "deliveries.unknown", level: "digest", title: `${r!.deliveries} 条飞书内容群推送不确定是否送达`, detail: "后台“运行”页核对群里有没有，再标记或重发" });
+  if (r!.deliveries > 0) out.push({ key: "deliveries.unknown", level: "digest", title: `${r!.deliveries} 条内容推送不确定是否送达`, detail: "后台“运行”页核对目标聊天有没有，再标记或重发" });
 
   // Runnable jobs (deferred ones excluded) that have waited more than two hours.
   const queues = await sql<{ name: string; n: number; oldest: Date }[]>`

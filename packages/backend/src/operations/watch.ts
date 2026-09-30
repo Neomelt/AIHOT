@@ -1,6 +1,7 @@
 // The worker watchdog, run from the api process: the worker cannot report its own death.
 import { sql } from "../db.ts";
-import { beijingStamp, formatAlert, formatRecovery, sendAlert, type Finding } from "../notify/feishu.ts";
+import { beijingStamp, formatAlert, formatRecovery, type Finding } from "../notify/feishu.ts";
+import { sendAlert } from "../notify/alerts.ts";
 
 async function readSetting<T>(key: string): Promise<T | null> {
   const [row] = await sql<{ value: T }[]>`SELECT value FROM settings WHERE key = ${key}`;
